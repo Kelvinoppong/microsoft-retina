@@ -6,6 +6,7 @@ package capture
 import (
 	"time"
 
+	"github.com/microsoft/retina/pkg/log"
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
@@ -47,7 +48,7 @@ var opts = Opts{
 
 const DefaultName = "retina-capture"
 
-func NewCommand(kubeClient kubernetes.Interface) *cobra.Command {
+func NewCommand(kubeClient kubernetes.Interface, logger *log.ZapLogger) *cobra.Command {
 	capture := &cobra.Command{
 		Use:   "capture",
 		Short: "Capture network traffic",
@@ -58,9 +59,9 @@ func NewCommand(kubeClient kubernetes.Interface) *cobra.Command {
 	opts.AddFlags(capture.PersistentFlags())
 	capture.PersistentFlags().StringVar(opts.Name, "name", DefaultName, "The name of the Retina Capture")
 
-	capture.AddCommand(NewCreateSubCommand(kubeClient))
-	capture.AddCommand(NewDeleteSubCommand(kubeClient))
-	capture.AddCommand(NewDownloadSubCommand())
+	capture.AddCommand(NewCreateSubCommand(kubeClient, logger))
+	capture.AddCommand(NewDeleteSubCommand(kubeClient, logger))
+	capture.AddCommand(NewDownloadSubCommand(logger))
 	capture.AddCommand(NewListSubCommand())
 
 	return capture

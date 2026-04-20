@@ -94,7 +94,7 @@ func createArgs(name, namespace, podSelectors string) []string {
 }
 
 func createCapture(t *testing.T, kubeClient kubernetes.Interface, name, namespace, podSelectors string) {
-	createCmd := NewCommand(kubeClient)
+	createCmd := NewCommand(kubeClient, testLogger(t))
 
 	createCmd.SetArgs(createArgs(name, namespace, podSelectors))
 
@@ -172,7 +172,7 @@ func TestDeleteCaptureJobs(t *testing.T) {
 			kubeClient := setupDeleteTest(t, tc)
 
 			// Create a delete command
-			deleteCmd := NewCommand(kubeClient)
+			deleteCmd := NewCommand(kubeClient, testLogger(t))
 
 			// Set command args
 			deleteCmd.SetArgs(deleteArgs(tc))

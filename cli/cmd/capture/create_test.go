@@ -233,7 +233,7 @@ func TestCreateJobsWithNamespace(t *testing.T) {
 		fmt.Println("\n### Running test case:", tc.name)
 		// Given
 		kubeClient := newKubeclient()
-		cmd := NewCommand(kubeClient)
+		cmd := NewCommand(kubeClient, testLogger(t))
 		cmd.SetArgs(argsFromTestCase(tc))
 		buf := new(bytes.Buffer)
 		cmd.SetOut(buf)
@@ -342,7 +342,7 @@ func TestCreateCaptureCommand_PodNamesWithNodeSelector_ShouldFail(t *testing.T) 
 	// Test that when pod-names is specified with node-selectors, the node selector is overridden
 	// and the command attempts to use pod names. Since the pod doesn't exist, this will fail.
 	// This verifies that pod names take precedence over default node selectors.
-	cmd := NewCommand(fake.NewClientset())
+	cmd := NewCommand(fake.NewClientset(), testLogger(t))
 
 	cmd.SetArgs([]string{
 		"create",

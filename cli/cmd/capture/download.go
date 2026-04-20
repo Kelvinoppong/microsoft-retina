@@ -20,11 +20,11 @@ import (
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/storage"
-	retinacmd "github.com/microsoft/retina/cli/cmd"
 	captureConstants "github.com/microsoft/retina/pkg/capture/constants"
 	captureFile "github.com/microsoft/retina/pkg/capture/file"
 	captureUtils "github.com/microsoft/retina/pkg/capture/utils"
 	captureLabels "github.com/microsoft/retina/pkg/label"
+	"github.com/microsoft/retina/pkg/log"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
@@ -103,6 +103,7 @@ type DownloadCmd struct {
 type DownloadService struct {
 	kubeClient kubernetes.Interface
 	config     *rest.Config
+	logger     *log.ZapLogger
 	namespace  string
 }
 
@@ -113,16 +114,17 @@ type Key struct {
 }
 
 // NewDownloadService creates a new download service with shared dependencies
-func NewDownloadService(kubeClient kubernetes.Interface, config *rest.Config, namespace string) *DownloadService {
+func NewDownloadService(kubeClient kubernetes.Interface, config *rest.Config, namespace string, logger *log.ZapLogger) *DownloadService {
 	return &DownloadService{
 		kubeClient: kubeClient,
 		config:     config,
+		logger:     logger,
 		namespace:  namespace,
 	}
 }
 
-func getDownloadCmd(node *corev1.Node, hostPath, fileName string) (*DownloadCmd, error) {
-	nodeOS, err := getNodeOS(node)
+func getDownloadCmd(node *corev1.Node, hostPath, fileName string, logger *log.ZapLogger) (*DownloadCmd, error) {
+	nodeOS, err := getNodeOS(node, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +138,7 @@ func getDownloadCmd(node *corev1.Node, hostPath, fileName string) (*DownloadCmd,
 		srcFilePath := "C:\\host" + strings.ReplaceAll(hostPath, "/", "\\") + "\\" + fileName + ".tar.gz"
 		mountPath := "C:\\host" + strings.ReplaceAll(hostPath, "/", "\\")
 		return &DownloadCmd{
-			ContainerImage:   getWindowsContainerImage(node),
+			ContainerImage:   getWindowsContainerImage(node, logger),
 			SrcFilePath:      srcFilePath,
 			MountPath:        mountPath,
 			KeepAliveCommand: []string{"cmd", "/c", "echo Download pod ready & ping -n 3601 127.0.0.1 > nul"},
@@ -159,16 +161,16 @@ func getDownloadCmd(node *corev1.Node, hostPath, fileName string) (*DownloadCmd,
 	}
 }
 
-func getNodeOS(node *corev1.Node) (NodeOS, error) {
+func getNodeOS(node *corev1.Node, logger *log.ZapLogger) (NodeOS, error) {
 	nodeOS := strings.ToLower(node.Status.NodeInfo.OperatingSystem)
 
 	if strings.Contains(nodeOS, "windows") {
-		retinacmd.Logger.Info("Detected node OS: Windows", zap.String("node", node.Name), zap.String("os", node.Status.NodeInfo.OperatingSystem))
+		logger.Info("Detected node OS: Windows", zap.String("node", node.Name), zap.String("os", node.Status.NodeInfo.OperatingSystem))
 		return Windows, nil
 	}
 
 	if strings.Contains(nodeOS, "linux") {
-		retinacmd.Logger.Info("Detected node OS: Linux", zap.String("node", node.Name), zap.String("os", node.Status.NodeInfo.OperatingSystem))
+		logger.Info("Detected node OS: Linux", zap.String("node", node.Name), zap.String("os", node.Status.NodeInfo.OperatingSystem))
 		return Linux, nil
 	}
 
@@ -176,7 +178,7 @@ func getNodeOS(node *corev1.Node) (NodeOS, error) {
 }
 
 // Detects the Windows LTSC version and returns the appropriate nanoserver image
-func getWindowsContainerImage(node *corev1.Node) string {
+func getWindowsContainerImage(node *corev1.Node, logger *log.ZapLogger) string {
 	osImage := strings.ToLower(node.Status.NodeInfo.OSImage)
 
 	var suffix string
@@ -188,14 +190,14 @@ func getWindowsContainerImage(node *corev1.Node) string {
 	case strings.Contains(osImage, "2016"):
 		suffix = "ltsc2016"
 	default:
-		retinacmd.Logger.Warn("Could not determine Windows LTSC version, defaulting to ltsc2022",
+		logger.Warn("Could not determine Windows LTSC version, defaulting to ltsc2022",
 			zap.String("node", node.Name),
 			zap.String("osImage", osImage))
 		suffix = "ltsc2022"
 	}
 
 	containerImage := "mcr.microsoft.com/windows/nanoserver:" + suffix
-	retinacmd.Logger.Info("Selected Windows container image", zap.String("image", containerImage))
+	logger.Info("Selected Windows container image", zap.String("image", containerImage))
 
 	return containerImage
 }
@@ -220,14 +222,14 @@ var downloadExample = templates.Examples(i18n.T(`
 		kubectl retina capture download --blob-url "<blob-url>"
 `))
 
-func downloadFromCluster(ctx context.Context, config *rest.Config, namespace string) error {
+func downloadFromCluster(ctx context.Context, config *rest.Config, namespace string, logger *log.ZapLogger) error {
 	fmt.Println("Downloading capture: ", captureName)
 	kubeClient, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return fmt.Errorf("failed to initialize k8s client: %w", err)
 	}
 
-	downloadService := NewDownloadService(kubeClient, config, namespace)
+	downloadService := NewDownloadService(kubeClient, config, namespace, logger)
 
 	pods, err := getCapturePods(ctx, kubeClient, captureName, namespace)
 	if err != nil {
@@ -290,7 +292,7 @@ func (ds *DownloadService) DownloadFileContent(ctx context.Context, nodeName, ho
 		return nil, errors.Join(ErrGetNodeInfo, err)
 	}
 
-	downloadCmd, err := getDownloadCmd(node, hostPath, fileName)
+	downloadCmd, err := getDownloadCmd(node, hostPath, fileName, ds.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -305,7 +307,7 @@ func (ds *DownloadService) DownloadFileContent(ctx context.Context, nodeName, ho
 	defer func() {
 		cleanupErr := ds.kubeClient.CoreV1().Pods(ds.namespace).Delete(ctx, downloadPod.Name, metav1.DeleteOptions{})
 		if cleanupErr != nil {
-			retinacmd.Logger.Warn("Failed to clean up debug pod", zap.String("name", downloadPod.Name), zap.Error(cleanupErr))
+			ds.logger.Warn("Failed to clean up debug pod", zap.String("name", downloadPod.Name), zap.Error(cleanupErr))
 		}
 	}()
 
@@ -480,16 +482,19 @@ func (ds *DownloadService) createDownloadExec(ctx context.Context, pod *corev1.P
 	return outBuf.String(), nil
 }
 
-func downloadFromBlob() error {
+func downloadFromBlob(logger *log.ZapLogger) error {
 	u, err := url.Parse(blobURL)
 	if err != nil {
-		retinacmd.Logger.Error("err: ", zap.Error(err))
+		logger.Error("err: ", zap.Error(err))
 		return fmt.Errorf("failed to parse SAS URL %s: %w", blobURL, err)
+	}
+	if u.RawQuery == "" {
+		return fmt.Errorf("blob URL must include a SAS token with read/list permissions")
 	}
 
 	b, err := storage.NewAccountSASClientFromEndpointToken(u.String(), u.Query().Encode())
 	if err != nil {
-		retinacmd.Logger.Error("err: ", zap.Error(err))
+		logger.Error("err: ", zap.Error(err))
 		return fmt.Errorf("failed to create storage account client: %w", err)
 	}
 
@@ -501,12 +506,12 @@ func downloadFromBlob() error {
 	params := storage.ListBlobsParameters{Prefix: *opts.Name}
 	blobList, err := blobService.GetContainerReference(containerName).ListBlobs(params)
 	if err != nil {
-		retinacmd.Logger.Error("err: ", zap.Error(err))
+		logger.Error("err: ", zap.Error(err))
 		return fmt.Errorf("failed to list blobstore: %w", err)
 	}
 
 	if len(blobList.Blobs) == 0 {
-		retinacmd.Logger.Error("err: ", zap.Error(err))
+		logger.Error("err: ", zap.Error(err))
 		return fmt.Errorf("%w: %s", ErrNoBlobsFound, *opts.Name)
 	}
 
@@ -520,21 +525,21 @@ func downloadFromBlob() error {
 		blobRef := blobService.GetContainerReference(containerName).GetBlobReference(blob.Name)
 		readCloser, err := blobRef.Get(&storage.GetBlobOptions{})
 		if err != nil {
-			retinacmd.Logger.Error("err: ", zap.Error(err))
+			logger.Error("err: ", zap.Error(err))
 			return fmt.Errorf("failed to read from blobstore: %w", err)
 		}
 
 		blobData, err := io.ReadAll(readCloser)
 		readCloser.Close()
 		if err != nil {
-			retinacmd.Logger.Error("err: ", zap.Error(err))
+			logger.Error("err: ", zap.Error(err))
 			return fmt.Errorf("failed to obtain blob from blobstore: %w", err)
 		}
 
 		outputFile := filepath.Join(outputPath, blob.Name)
 		err = os.WriteFile(outputFile, blobData, 0o600)
 		if err != nil {
-			retinacmd.Logger.Error("err: ", zap.Error(err))
+			logger.Error("err: ", zap.Error(err))
 			return fmt.Errorf("failed to write file: %w", err)
 		}
 
@@ -543,7 +548,7 @@ func downloadFromBlob() error {
 	return nil
 }
 
-func downloadAllCaptures(ctx context.Context, config *rest.Config, namespace string) error {
+func downloadAllCaptures(ctx context.Context, config *rest.Config, namespace string, logger *log.ZapLogger) error {
 	if downloadAllNamespaces {
 		fmt.Println("Downloading all captures from all namespaces...")
 	} else {
@@ -612,7 +617,7 @@ func downloadAllCaptures(ctx context.Context, config *rest.Config, namespace str
 	finalArchivePath := filepath.Join(outputPath, fmt.Sprintf("all-captures-%s.tar.gz", timestamp))
 
 	fmt.Printf("Creating final archive: %s\n", finalArchivePath)
-	err = createStreamingTarGzArchive(ctx, finalArchivePath, captureToJobs, kubeClient, config)
+	err = createStreamingTarGzArchive(ctx, finalArchivePath, captureToJobs, kubeClient, config, logger)
 	if err != nil {
 		return fmt.Errorf("failed to create final archive: %w", err)
 	}
@@ -622,7 +627,7 @@ func downloadAllCaptures(ctx context.Context, config *rest.Config, namespace str
 }
 
 // createStreamingTarGzArchive creates a tar.gz archive by streaming files one at a time to avoid memory issues
-func createStreamingTarGzArchive(ctx context.Context, outputPath string, captureToJobs map[Key][]batchv1.Job, kubeClient kubernetes.Interface, config *rest.Config) error {
+func createStreamingTarGzArchive(ctx context.Context, outputPath string, captureToJobs map[Key][]batchv1.Job, kubeClient kubernetes.Interface, config *rest.Config, logger *log.ZapLogger) error {
 	// Create the output file
 	outFile, err := os.Create(outputPath)
 	if err != nil {
@@ -651,7 +656,7 @@ func createStreamingTarGzArchive(ctx context.Context, outputPath string, capture
 		// Get or create download service for this namespace
 		downloadService, exists := downloadServices[currentNamespace]
 		if !exists {
-			downloadService = NewDownloadService(kubeClient, config, currentNamespace)
+			downloadService = NewDownloadService(kubeClient, config, currentNamespace, logger)
 			downloadServices[currentNamespace] = downloadService
 		}
 
@@ -732,7 +737,7 @@ func createStreamingTarGzArchive(ctx context.Context, outputPath string, capture
 	return nil
 }
 
-func NewDownloadSubCommand() *cobra.Command {
+func NewDownloadSubCommand(logger *log.ZapLogger) *cobra.Command {
 	downloadCapture := &cobra.Command{
 		Use:     "download",
 		Short:   "Download Retina Captures",
@@ -763,21 +768,21 @@ func NewDownloadSubCommand() *cobra.Command {
 			}
 
 			if captureName != "" {
-				err = downloadFromCluster(ctx, kubeConfig, captureNamespace)
+				err = downloadFromCluster(ctx, kubeConfig, captureNamespace, logger)
 				if err != nil {
 					return err
 				}
 			}
 
 			if blobURL != "" {
-				err = downloadFromBlob()
+				err = downloadFromBlob(logger)
 				if err != nil {
 					return err
 				}
 			}
 
 			if downloadAll {
-				err = downloadAllCaptures(ctx, kubeConfig, captureNamespace)
+				err = downloadAllCaptures(ctx, kubeConfig, captureNamespace, logger)
 				if err != nil {
 					return err
 				}

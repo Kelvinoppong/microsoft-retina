@@ -257,7 +257,7 @@ func TestGetNodeOS(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := getNodeOS(tc.node)
+			result, err := getNodeOS(tc.node, testLogger(t))
 
 			if tc.wantErr && err == nil {
 				t.Errorf("Expected error for %s, but got none", tc.name)
@@ -373,7 +373,7 @@ func TestGetDownloadCmd(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := getDownloadCmd(tc.node, tc.hostPath, tc.fileName)
+			result, err := getDownloadCmd(tc.node, tc.hostPath, tc.fileName, testLogger(t))
 			tc.validate(t, result, err)
 		})
 	}
@@ -413,7 +413,7 @@ func TestGetWindowsContainerImage(t *testing.T) {
 				},
 			}
 
-			result := getWindowsContainerImage(node)
+			result := getWindowsContainerImage(node, testLogger(t))
 			expectedImage := "mcr.microsoft.com/windows/nanoserver:" + tc.expectedSuffix
 
 			if result != expectedImage {
@@ -428,7 +428,7 @@ func TestDownloadService(t *testing.T) {
 	config := &rest.Config{}
 	namespace := "test-namespace"
 
-	service := NewDownloadService(kubeClient, config, namespace)
+	service := NewDownloadService(kubeClient, config, namespace, testLogger(t))
 
 	// Test service creation
 	if service == nil {
@@ -525,7 +525,7 @@ func TestDownloadFromBlobValidation(t *testing.T) {
 			blobURL = tc.blobURL
 			defer func() { blobURL = originalBlobURL }()
 
-			err := downloadFromBlob()
+			err := downloadFromBlob(testLogger(t))
 
 			if tc.wantErr && err == nil {
 				t.Errorf("Expected error for %s, but got none", tc.name)
@@ -554,7 +554,7 @@ func TestDownloadServiceMethods(t *testing.T) {
 
 	kubeClient := newDownloadKubeClient(objects)
 	config := &rest.Config{}
-	service := NewDownloadService(kubeClient, config, "test-namespace")
+	service := NewDownloadService(kubeClient, config, "test-namespace", testLogger(t))
 
 	t.Run("createDownloadPod creates pod correctly", func(t *testing.T) {
 		downloadCmd := &DownloadCmd{
@@ -623,7 +623,7 @@ func TestDownloadServiceErrorHandling(t *testing.T) {
 	ctx := context.Background()
 	kubeClient := newDownloadKubeClient(nil)
 	config := &rest.Config{}
-	service := NewDownloadService(kubeClient, config, "test-namespace")
+	service := NewDownloadService(kubeClient, config, "test-namespace", testLogger(t))
 
 	t.Run("DownloadFile handles unsupported node OS", func(t *testing.T) {
 		// Create a node with unsupported OS
@@ -900,7 +900,7 @@ func TestDownloadCommandFlags(t *testing.T) {
 	// Test all cases with unified approach
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			cmd := NewDownloadSubCommand()
+			cmd := NewDownloadSubCommand(testLogger(t))
 
 			// Parse flags without executing the command
 			err := cmd.ParseFlags(tc.args)

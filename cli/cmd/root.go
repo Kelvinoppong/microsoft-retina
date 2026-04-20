@@ -7,11 +7,8 @@ import (
 	"os"
 
 	"github.com/microsoft/retina/pkg/client"
-	"github.com/microsoft/retina/pkg/log"
 	"github.com/spf13/cobra"
 )
-
-var Logger *log.ZapLogger
 
 // RetinaClient for customer consume
 var RetinaClient *client.Retina
@@ -33,9 +30,4 @@ var Retina = &cobra.Command{
 		_ = json.Unmarshal([]byte(file), &config)
 		RetinaClient = client.NewRetinaClient(config.RetinaEndpoint)
 	},
-}
-
-func init() {
-	log.SetupZapLogger(log.GetDefaultLogOpts())
-	Logger = log.Logger().Named("retina-cli")
 }
