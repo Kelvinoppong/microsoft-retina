@@ -278,34 +278,7 @@ func deleteSecret(ctx context.Context, kubeClient kubernetes.Interface, secretNa
 	return kubeClient.CoreV1().Secrets(*opts.Namespace).Delete(ctx, *secretName, metav1.DeleteOptions{}) //nolint:wrapcheck //internal return
 }
 
-func createCaptureF(ctx context.Context, kubeClient kubernetes.Interface, logger *log.ZapLogger) (*retinav1alpha1.Capture, error) {
-	timestamp := file.Now()
-
-	capture := &retinav1alpha1.Capture{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      *opts.Name,
-			Namespace: *opts.Namespace,
-		},
-		Spec: retinav1alpha1.CaptureSpec{
-			CaptureConfiguration: retinav1alpha1.CaptureConfiguration{
-				TcpdumpFilter:   &opts.tcpdumpFilter,
-				CaptureTarget:   retinav1alpha1.CaptureTarget{},
-				IncludeMetadata: opts.includeMetadata,
-				CaptureOption:   retinav1alpha1.CaptureOption{},
-			},
-		},
-		Status: retinav1alpha1.CaptureStatus{
-			StartTime: timestamp,
-		},
-	}
-
-	logger.Info(fmt.Sprintf("Capture timestamp: %s", timestamp))
-
-	if opts.duration != 0 {
-		logger.Info(fmt.Sprintf("The capture duration is set to %s", opts.duration))
-		capture.Spec.CaptureConfiguration.CaptureOption.Duration = &metav1.Duration{Duration: opts.duration}
-	}
-
+func applyCaptureTargetOptions(capture *retinav1alpha1.Capture, logger *log.ZapLogger) error {
 	if opts.namespaceSelectors != "" || opts.podSelectors != "" || opts.podNames != "" {
 		// if node selector is using the default value (aka hasn't been set by user), set it to nil to prevent clash with namespace and pod selector
 		if opts.nodeSelectors == DefaultNodeSelectors {
@@ -317,15 +290,15 @@ func createCaptureF(ctx context.Context, kubeClient kubernetes.Interface, logger
 
 	nodeSelectorLabelsMap, err := labels.ConvertSelectorToLabelsMap(opts.nodeSelectors)
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("failed to parse node selectors: %w", err)
 	}
 	podSelectorLabelsMap, err := labels.ConvertSelectorToLabelsMap(opts.podSelectors)
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("failed to parse pod selectors: %w", err)
 	}
 	namespaceSelectorLabelsMap, err := labels.ConvertSelectorToLabelsMap(opts.namespaceSelectors)
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("failed to parse namespace selectors: %w", err)
 	}
 
 	if len(nodeSelectorLabelsMap) != 0 || opts.nodeNames != "" {
@@ -367,6 +340,41 @@ func createCaptureF(ctx context.Context, kubeClient kubernetes.Interface, logger
 		}
 		logger.Info(fmt.Sprintf("Capturing on specific pods: %v", podNameSlice))
 		capture.Spec.CaptureConfiguration.CaptureTarget.PodNames = podNameSlice
+	}
+
+	return nil
+}
+
+func createCaptureF(ctx context.Context, kubeClient kubernetes.Interface, logger *log.ZapLogger) (*retinav1alpha1.Capture, error) {
+	timestamp := file.Now()
+
+	capture := &retinav1alpha1.Capture{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      *opts.Name,
+			Namespace: *opts.Namespace,
+		},
+		Spec: retinav1alpha1.CaptureSpec{
+			CaptureConfiguration: retinav1alpha1.CaptureConfiguration{
+				TcpdumpFilter:   &opts.tcpdumpFilter,
+				CaptureTarget:   retinav1alpha1.CaptureTarget{},
+				IncludeMetadata: opts.includeMetadata,
+				CaptureOption:   retinav1alpha1.CaptureOption{},
+			},
+		},
+		Status: retinav1alpha1.CaptureStatus{
+			StartTime: timestamp,
+		},
+	}
+
+	logger.Info(fmt.Sprintf("Capture timestamp: %s", timestamp))
+
+	if opts.duration != 0 {
+		logger.Info(fmt.Sprintf("The capture duration is set to %s", opts.duration))
+		capture.Spec.CaptureConfiguration.CaptureOption.Duration = &metav1.Duration{Duration: opts.duration}
+	}
+
+	if err := applyCaptureTargetOptions(capture, logger); err != nil {
+		return nil, err
 	}
 
 	if opts.maxSize != 0 {

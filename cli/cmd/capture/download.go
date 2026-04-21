@@ -58,23 +58,24 @@ const (
 )
 
 var (
-	blobURL               string
-	ErrCreateDirectory    = errors.New("failed to create directory")
-	ErrGetNodeInfo        = errors.New("failed to get node information")
-	ErrWriteFileToHost    = errors.New("failed to write file to host")
-	ErrObtainPodList      = errors.New("failed to obtain list of pods")
-	ErrExecFileDownload   = errors.New("failed to exec file download in container")
-	ErrCreateDownloadPod  = errors.New("failed to create download pod")
-	ErrGetDownloadPod     = errors.New("failed to get download pod")
-	ErrCheckFileExistence = errors.New("failed to check file existence")
-	ErrCreateExecutor     = errors.New("failed to create executor")
-	ErrExecCommand        = errors.New("failed to exec command")
-	ErrCreateOutputDir    = errors.New("failed to create output directory")
-	ErrNoBlobsFound       = errors.New("no blobs found with prefix")
-	captureName           string
-	outputPath            string
-	downloadAll           bool
-	downloadAllNamespaces bool
+	blobURL                string
+	ErrCreateDirectory     = errors.New("failed to create directory")
+	ErrGetNodeInfo         = errors.New("failed to get node information")
+	ErrWriteFileToHost     = errors.New("failed to write file to host")
+	ErrObtainPodList       = errors.New("failed to obtain list of pods")
+	ErrExecFileDownload    = errors.New("failed to exec file download in container")
+	ErrCreateDownloadPod   = errors.New("failed to create download pod")
+	ErrGetDownloadPod      = errors.New("failed to get download pod")
+	ErrCheckFileExistence  = errors.New("failed to check file existence")
+	ErrCreateExecutor      = errors.New("failed to create executor")
+	ErrExecCommand         = errors.New("failed to exec command")
+	ErrCreateOutputDir     = errors.New("failed to create output directory")
+	ErrNoBlobsFound        = errors.New("no blobs found with prefix")
+	ErrMissingBlobSASToken = errors.New("blob URL must include a SAS token with read/list permissions")
+	captureName            string
+	outputPath             string
+	downloadAll            bool
+	downloadAllNamespaces  bool
 )
 
 var (
@@ -489,7 +490,7 @@ func downloadFromBlob(logger *log.ZapLogger) error {
 		return fmt.Errorf("failed to parse SAS URL %s: %w", blobURL, err)
 	}
 	if u.RawQuery == "" {
-		return fmt.Errorf("blob URL must include a SAS token with read/list permissions")
+		return ErrMissingBlobSASToken
 	}
 
 	b, err := storage.NewAccountSASClientFromEndpointToken(u.String(), u.Query().Encode())
