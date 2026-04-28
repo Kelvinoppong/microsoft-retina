@@ -47,6 +47,17 @@ CONTAINER_BUILDER ?= docker
 CONTAINER_RUNTIME ?= docker
 YEAR 			  ?= 2022
 
+# BuildKit image used as the buildx driver image. Override to bump or
+# substitute a different mirror (e.g. when MCR is unreachable).
+BUILDKIT_IMAGE	?= mcr.microsoft.com/oss/v2/moby/buildkit:v0.16.0-2
+
+# Number of attempts and the initial backoff (seconds) used when booting
+# the buildx builder. The buildx driver image is pulled the first time
+# the builder boots; transient registry/CDN errors are retried with
+# exponential backoff.
+BUILDX_BOOT_RETRIES	?= 5
+BUILDX_BOOT_BACKOFF	?= 5
+
 ALL_ARCH.linux = amd64 arm64
 ALL_ARCH.windows = amd64
 
@@ -207,11 +218,42 @@ manifest-skopeo-archive: # util target to export tar archive of multiarch contai
 
 
 buildx:
-	if docker buildx inspect retina > /dev/null 2>&1; then \
+	@if docker buildx inspect retina > /dev/null 2>&1; then \
 		echo "Buildx instance retina already exists."; \
 	else \
+		echo "Pre-pulling buildkit image $(BUILDKIT_IMAGE) (with retries)..."; \
+		attempt=1; max_attempts=$(BUILDX_BOOT_RETRIES); backoff=$(BUILDX_BOOT_BACKOFF); \
+		while true; do \
+			if docker pull $(BUILDKIT_IMAGE); then \
+				break; \
+			fi; \
+			if [ $$attempt -ge $$max_attempts ]; then \
+				echo "Failed to pull $(BUILDKIT_IMAGE) after $$max_attempts attempts."; \
+				exit 1; \
+			fi; \
+			echo "Pull attempt $$attempt/$$max_attempts failed; sleeping $$backoff s before retry..."; \
+			sleep $$backoff; \
+			attempt=$$((attempt + 1)); \
+			backoff=$$((backoff * 2)); \
+		done; \
 		echo "Creating buildx instance retina..."; \
-		docker buildx create --name retina --use --driver-opt image=mcr.microsoft.com/oss/v2/moby/buildkit:v0.16.0-2 --platform $$(echo "$(PLATFORMS)" | tr ' ' ','); \
+		attempt=1; max_attempts=$(BUILDX_BOOT_RETRIES); backoff=$(BUILDX_BOOT_BACKOFF); \
+		while true; do \
+			if docker buildx create --name retina --use --bootstrap \
+				--driver-opt image=$(BUILDKIT_IMAGE) \
+				--platform $$(echo "$(PLATFORMS)" | tr ' ' ','); then \
+				break; \
+			fi; \
+			docker buildx rm retina > /dev/null 2>&1 || true; \
+			if [ $$attempt -ge $$max_attempts ]; then \
+				echo "Failed to create buildx instance retina after $$max_attempts attempts."; \
+				exit 1; \
+			fi; \
+			echo "Create attempt $$attempt/$$max_attempts failed; sleeping $$backoff s before retry..."; \
+			sleep $$backoff; \
+			attempt=$$((attempt + 1)); \
+			backoff=$$((backoff * 2)); \
+		done; \
 		docker buildx use retina; \
 		echo "Buildx instance retina created."; \
 	fi;
